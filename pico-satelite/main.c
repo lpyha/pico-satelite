@@ -34,19 +34,13 @@
 #define HIGH 1
 #define LOW 0
 
+const uint8_t SOCKET_NUM = 0;
+
 /* Pins */
 
 #define INDICATOR_O2_VALVE 11
 #define INDICATOR_N2O_FILL_VALVE 12
 #define INDICATOR_N2O_DUMP_VALVE 13
-
-const uint32_t HEADER_FILL      = 0xFFFFFFF0;
-const uint32_t HEADER_DUMP      = 0xFFFFFFF1;
-const uint32_t HEADER_PURGE     = 0xFFFFFFF2;
-const uint32_t HEADER_IGNITION  = 0xFFFFFFF3;
-const uint32_t COMMAND_CLOSE    = 0x00000000;
-const uint32_t COMMAND_STATUS   = 0x00000001;
-const uint32_t COMMAND_OPEN     = 0x00000002;
 
 static wiz_NetInfo g_net_info ={
     .mac = {0x00, 0x08, 0xDC, 0x12, 0x34, 0x56}, // MAC address
@@ -66,59 +60,113 @@ static uint8_t g_buf[ETHERNET_BUF_MAX_SIZE] = {
 static void set_clock_khz(void);
 
 uint32_t convert2Uint32(const uint8_t* buf) {
-    return ((uint32_t)buf[0] << 24) |
-        ((uint32_t)buf[1] << 16) |
-        ((uint32_t)buf[2] << 8)  |
-        (uint32_t)buf[3];
+    return  ((uint32_t)buf[0] << 24) |
+            ((uint32_t)buf[1] << 16) |
+            ((uint32_t)buf[2] << 8)  |
+            (uint32_t)buf[3];
+}
+
+void convertToUint8Array(uint32_t header, uint32_t command, uint8_t* array) {
+    array[0] = (uint8_t)(header >> 24); // 最上位バイト
+    array[1] = (uint8_t)(header >> 16);
+    array[2] = (uint8_t)(header >> 8);
+    array[3] = (uint8_t)(header);
+
+    array[4] = (uint8_t)(command >> 24);
+    array[5] = (uint8_t)(command >> 16);
+    array[6] = (uint8_t)(command >> 8);
+    array[7] = (uint8_t)(command); // 最下位バイト
 }
 
 int actionActuator(uint32_t header, uint32_t command){
+    uint32_t ret;
+    uint8_t sendBuf[8]; 
     switch (header){
         case HEADER_FILL:
             if (command == COMMAND_OPEN){
-                onFillSequence();
+                ret = onFillSequence();
+                convertToUint8Array(header, ret, sendBuf);
+                send(SOCKET_NUM, (uint8_t*)&sendBuf, 8);
             } else if (command == COMMAND_STATUS){
-                printf("Fill valve status: %d\r\n", gpio_get(N2O_FILL_VALVE));
+                ret = getN2OFillValveStatus();
+                convertToUint8Array(header, ret, sendBuf);
+                send(SOCKET_NUM, (uint8_t*)&sendBuf, 8);
             } else if (command == COMMAND_CLOSE){
-                offFillSequence();
+                ret = offFillSequence();
+                convertToUint8Array(header, ret, sendBuf);
+                send(SOCKET_NUM, (uint8_t*)&sendBuf, 8);
             } else {
+                ret = COMMAND_ERORR;
+                convertToUint8Array(header, ret, sendBuf);
+                send(SOCKET_NUM, (uint8_t*)&sendBuf, 8);
                 return -1;
             }
             break;
         case HEADER_DUMP:
             if (command == COMMAND_OPEN){
-                onDumpSequence();
+                ret = onDumpSequence();
+                convertToUint8Array(header, ret, sendBuf);
+                send(SOCKET_NUM, (uint8_t*)&sendBuf, 8);
             } else if (command == COMMAND_STATUS){
-                printf("Dump valve status: %d\r\n", gpio_get(N2O_DUMP_VALVE));
+                ret = getN2ODumpValveStatus();
+                convertToUint8Array(header, ret, sendBuf);
+                send(SOCKET_NUM, (uint8_t*)&sendBuf, 8);
             } else if (command == COMMAND_CLOSE){
-                offDumpSequence();
+                ret = offDumpSequence();
+                convertToUint8Array(header, ret, sendBuf);
+                send(SOCKET_NUM, (uint8_t*)&sendBuf, 8);
             } else {
+                ret = COMMAND_ERORR;
+                convertToUint8Array(header, ret, sendBuf);
+                send(SOCKET_NUM, (uint8_t*)&sendBuf, 8);
                 return -1;
             }
             break;
         case HEADER_PURGE:
             if (command == COMMAND_OPEN){
-                onPurgeSequence();
+                ret = onPurgeSequence();
+                convertToUint8Array(header, ret, sendBuf);
+                send(SOCKET_NUM, (uint8_t*)&sendBuf, 8);
             } else if (command == COMMAND_STATUS){
-                printf("Purge valve status: %d\r\n", gpio_get(N2O_DUMP_VALVE));
+                ret = getN2ODumpValveStatus();
+                convertToUint8Array(header, ret, sendBuf);
+                send(SOCKET_NUM, (uint8_t*)&sendBuf, 8);
             } else if (command == COMMAND_CLOSE){
-                offPurgeSequence();
+                ret = offPurgeSequence();
+                convertToUint8Array(header, ret, sendBuf);
+                send(SOCKET_NUM, (uint8_t*)&sendBuf, 8);
             } else {
+                ret = COMMAND_ERORR;
+                convertToUint8Array(header, ret, sendBuf);
+                send(SOCKET_NUM, (uint8_t*)&sendBuf, 8);
                 return -1;
             }
             break;
         case HEADER_IGNITION:
             if (command == COMMAND_OPEN){
-                onIgnitionSequence();
+                ret = onIgnitionSequence();
+                convertToUint8Array(header, ret, sendBuf);
+                send(SOCKET_NUM, (uint8_t*)&sendBuf, 8);
             } else if (command == COMMAND_STATUS){
-                printf("Ignition valve status: %d\r\n", gpio_get(O2_VALVE));
+                ret = getO2ValveStatus();
+                convertToUint8Array(header, ret, sendBuf);
+                send(SOCKET_NUM, (uint8_t*)&sendBuf, 8);
             } else if (command == COMMAND_CLOSE){
-                offIgnitionSequence();
+                ret = offIgnitionSequence();
+                convertToUint8Array(header, ret, sendBuf);
+                send(SOCKET_NUM, (uint8_t*)&sendBuf, 8);
             } else {
+                ret = COMMAND_ERORR;
+                convertToUint8Array(header, ret, sendBuf);
+                send(SOCKET_NUM, (uint8_t*)&sendBuf, 8);
                 return -1;
             }
             break;
         default:
+            ret = COMMAND_ERORR;
+            convertToUint8Array(header, ret, sendBuf);
+            send(SOCKET_NUM, (uint8_t*)&sendBuf, 8);
+            return -1;
             break;
     }
     return 0;
@@ -165,29 +213,28 @@ int main()
         uint16_t size = 0, sentsize = 0;
         uint8_t destip[4];
         uint16_t destport;
-        uint8_t socketNum = 0;
 
-        switch (getSn_SR(socketNum))    // Get Sn_SR register
+        switch (getSn_SR(SOCKET_NUM))    // Get Sn_SR register
         {
         case SOCK_ESTABLISHED:
-            if (getSn_IR(socketNum) & Sn_IR_CON)
+            if (getSn_IR(SOCKET_NUM) & Sn_IR_CON)
             {
                 // 接続先のIPとポート番号を取得
-                getSn_DIPR(socketNum, destip);
-                destport = getSn_DPORT(socketNum);
+                getSn_DIPR(SOCKET_NUM, destip);
+                destport = getSn_DPORT(SOCKET_NUM);
                 printf(
                     "%d:Connected - %d.%d.%d.%d : %d\r\n",
-                    socketNum,
+                    SOCKET_NUM,
                     destip[0], destip[1], destip[2], destip[3],
                     destport
                 );
                 // Set Sn_IR register
-                setSn_IR(socketNum,Sn_IR_CON);
+                setSn_IR(SOCKET_NUM,Sn_IR_CON);
             }
             // 受信バッファにデータがあるか確認
-            if((size = getSn_RX_RSR(socketNum)) > 0){
+            if((size = getSn_RX_RSR(SOCKET_NUM)) > 0){
                 if (size > DATA_BUF_SIZE) size = DATA_BUF_SIZE;
-                ret = recv(socketNum, g_buf, size);
+                ret = recv(SOCKET_NUM, g_buf, size);
                 size = (uint16_t) ret;
                 sentsize = 0;
                 printf("Received data size: %d\r\n", size);
@@ -205,10 +252,10 @@ int main()
                 while(size != sentsize)
                 {
                     
-                    ret = send(socketNum, g_buf+sentsize, size-sentsize); // Data send process (User's buffer -> Destination through H/W Tx socket buffer)
+                    ret = send(SOCKET_NUM, g_buf+sentsize, size-sentsize); // Data send process (User's buffer -> Destination through H/W Tx socket buffer)
                     if(ret < 0) // Send Error occurred (sent data length < 0)
                     {
-                        close(socketNum); // socket close
+                        close(SOCKET_NUM); // socket close
                         return ret;
                     }
                     sentsize += ret; // Don't care SOCKERR_BUSY, because it is zero.
@@ -219,22 +266,22 @@ int main()
 
             break;
         case SOCK_CLOSE_WAIT:
-            if ((ret = disconnect(socketNum)) != SOCK_OK)
+            if ((ret = disconnect(SOCKET_NUM)) != SOCK_OK)
             {
                 break;
                 //return ret;
             }
-            printf("%d:Socket Closed\r\n", socketNum);
+            printf("%d:Socket Closed\r\n", SOCKET_NUM);
             break;
         case SOCK_INIT:
-            if ((ret = listen(socketNum)) != SOCK_OK)
+            if ((ret = listen(SOCKET_NUM)) != SOCK_OK)
             {
                 break;
                 //return ret;
             }
             break;
         case SOCK_CLOSED:
-            if ((ret = socket(socketNum, Sn_MR_TCP, PORT_LOOPBACK, 0)) == 0)
+            if ((ret = socket(SOCKET_NUM, Sn_MR_TCP, PORT_LOOPBACK, 0)) == 0)
             {
                 break;
                 //return ret;
@@ -246,11 +293,6 @@ int main()
     }
 }
 
-/**
- * ----------------------------------------------------------------------------------------------------
- * Functions
- * ----------------------------------------------------------------------------------------------------
- */
 /* Clock */
 static void set_clock_khz(void)
 {
