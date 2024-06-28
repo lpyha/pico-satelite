@@ -2,6 +2,7 @@ set(TARGET_NAME pico-satelite)
 
 add_executable(${TARGET_NAME}
         main.c
+        sequence.hpp
         )
 
 target_link_libraries(${TARGET_NAME} PRIVATE

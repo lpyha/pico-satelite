@@ -4,12 +4,9 @@
  * SPDX-License-Identifier: BSD-3-Clause
  */
 
-/**
- * ----------------------------------------------------------------------------------------------------
- * Includes
- * ----------------------------------------------------------------------------------------------------
- */
 #include <stdio.h>
+#include <string.h>
+#include <stdint.h>
 #include <pico/stdio.h>
 #include "port_common.h"
 
@@ -18,11 +15,10 @@
 
 #include "loopback.h"
 #include "socket.h"
-/**
- * ----------------------------------------------------------------------------------------------------
- * Macros
- * ----------------------------------------------------------------------------------------------------
- */
+
+#include "sequence.hpp"
+
+
 /* Clock */
 #define PLL_SYS_KHZ (133 * 1000)
 
@@ -35,40 +31,99 @@
 /* Port */
 #define PORT_LOOPBACK 5000
 
-/**
- * ----------------------------------------------------------------------------------------------------
- * Variables
- * ----------------------------------------------------------------------------------------------------
- */
-/* Network */
-static wiz_NetInfo g_net_info =
-    {
-        .mac = {0x00, 0x08, 0xDC, 0x12, 0x34, 0x56}, // MAC address
-        .ip = {192, 168, 11, 2},                     // IP address
-        .sn = {255, 255, 255, 0},                    // Subnet Mask
-        .gw = {192, 168, 11, 1},                     // Gateway
-        .dns = {8, 8, 8, 8},                         // DNS server
-        .dhcp = NETINFO_STATIC                       // DHCP enable/disable
+#define HIGH 1
+#define LOW 0
+
+/* Pins */
+
+#define INDICATOR_O2_VALVE 11
+#define INDICATOR_N2O_FILL_VALVE 12
+#define INDICATOR_N2O_DUMP_VALVE 13
+
+const uint32_t HEADER_FILL      = 0xFFFFFFF0;
+const uint32_t HEADER_DUMP      = 0xFFFFFFF1;
+const uint32_t HEADER_PURGE     = 0xFFFFFFF2;
+const uint32_t HEADER_IGNITION  = 0xFFFFFFF3;
+const uint32_t COMMAND_CLOSE    = 0x00000000;
+const uint32_t COMMAND_STATUS   = 0x00000001;
+const uint32_t COMMAND_OPEN     = 0x00000002;
+
+static wiz_NetInfo g_net_info ={
+    .mac = {0x00, 0x08, 0xDC, 0x12, 0x34, 0x56}, // MAC address
+    .ip = {192, 168, 100, 100},                     // IP address
+    .sn = {255, 255, 255, 0},                    // Subnet Mask
+    .gw = {192, 168, 100, 1},                     // Gateway
+    .dns = {8, 8, 8, 8},                         // DNS server
+    .dhcp = NETINFO_STATIC                       // DHCP enable/disable
 };
 
-/* Loopback */
-static uint8_t g_loopback_buf[ETHERNET_BUF_MAX_SIZE] = {
+static uint8_t g_buf[ETHERNET_BUF_MAX_SIZE] = {
     0,
 };
 
-/**
- * ----------------------------------------------------------------------------------------------------
- * Functions
- * ----------------------------------------------------------------------------------------------------
- */
+
 /* Clock */
 static void set_clock_khz(void);
 
-/**
- * ----------------------------------------------------------------------------------------------------
- * Main
- * ----------------------------------------------------------------------------------------------------
- */
+uint32_t convert2Uint32(const uint8_t* buf) {
+    return ((uint32_t)buf[0] << 24) |
+        ((uint32_t)buf[1] << 16) |
+        ((uint32_t)buf[2] << 8)  |
+        (uint32_t)buf[3];
+}
+
+int actionActuator(uint32_t header, uint32_t command){
+    switch (header){
+        case HEADER_FILL:
+            if (command == COMMAND_OPEN){
+                onFillSequence();
+            } else if (command == COMMAND_STATUS){
+                printf("Fill valve status: %d\r\n", gpio_get(N2O_FILL_VALVE));
+            } else if (command == COMMAND_CLOSE){
+                offFillSequence();
+            } else {
+                return -1;
+            }
+            break;
+        case HEADER_DUMP:
+            if (command == COMMAND_OPEN){
+                onDumpSequence();
+            } else if (command == COMMAND_STATUS){
+                printf("Dump valve status: %d\r\n", gpio_get(N2O_DUMP_VALVE));
+            } else if (command == COMMAND_CLOSE){
+                offDumpSequence();
+            } else {
+                return -1;
+            }
+            break;
+        case HEADER_PURGE:
+            if (command == COMMAND_OPEN){
+                onPurgeSequence();
+            } else if (command == COMMAND_STATUS){
+                printf("Purge valve status: %d\r\n", gpio_get(N2O_DUMP_VALVE));
+            } else if (command == COMMAND_CLOSE){
+                offPurgeSequence();
+            } else {
+                return -1;
+            }
+            break;
+        case HEADER_IGNITION:
+            if (command == COMMAND_OPEN){
+                onIgnitionSequence();
+            } else if (command == COMMAND_STATUS){
+                printf("Ignition valve status: %d\r\n", gpio_get(O2_VALVE));
+            } else if (command == COMMAND_CLOSE){
+                offIgnitionSequence();
+            } else {
+                return -1;
+            }
+            break;
+        default:
+            break;
+    }
+    return 0;
+}
+
 int main()
 {
     /* Initialize */
@@ -77,7 +132,20 @@ int main()
     set_clock_khz();
 
     stdio_init_all();
-
+    // -------------initialize GPIO------------------
+    gpio_init(O2_VALVE);
+    gpio_init(N2O_FILL_VALVE);
+    gpio_init(N2O_DUMP_VALVE);
+    gpio_init(INDICATOR_O2_VALVE);
+    gpio_init(INDICATOR_N2O_FILL_VALVE);
+    gpio_init(INDICATOR_N2O_DUMP_VALVE);
+    gpio_set_dir(O2_VALVE, GPIO_OUT);
+    gpio_set_dir(N2O_FILL_VALVE, GPIO_OUT);
+    gpio_set_dir(N2O_DUMP_VALVE, GPIO_OUT);
+    gpio_set_dir(INDICATOR_O2_VALVE, GPIO_OUT);
+    gpio_set_dir(INDICATOR_N2O_FILL_VALVE, GPIO_OUT);
+    gpio_set_dir(INDICATOR_N2O_DUMP_VALVE, GPIO_OUT);
+    // ----------------------------------------------
     wizchip_spi_initialize();
     wizchip_cris_initialize();
 
@@ -119,22 +187,25 @@ int main()
             // 受信バッファにデータがあるか確認
             if((size = getSn_RX_RSR(socketNum)) > 0){
                 if (size > DATA_BUF_SIZE) size = DATA_BUF_SIZE;
-                ret = recv(socketNum, g_loopback_buf, size);
+                ret = recv(socketNum, g_buf, size);
                 size = (uint16_t) ret;
                 sentsize = 0;
                 printf("Received data size: %d\r\n", size);
-                // 受信データを出力
-                printf("Received data: ");
-                for (int i = 0; i < size; i++)
-                {
-                    printf("%c", g_loopback_buf[i]);
+                { // 受信データを出力
+                    printf("Received data: ");
+                    for (int i = 0; i < size; i++){
+                        printf("%x", g_buf[i]);
+                    }
+                    printf("\r\n");
                 }
-                printf("\r\n");
+                uint32_t header = convert2Uint32(g_buf);
+                uint32_t command = convert2Uint32(g_buf + 4);
+                actionActuator(header, command);
                 /* loopback処理
                 while(size != sentsize)
                 {
                     
-                    ret = send(socketNum, g_loopback_buf+sentsize, size-sentsize); // Data send process (User's buffer -> Destination through H/W Tx socket buffer)
+                    ret = send(socketNum, g_buf+sentsize, size-sentsize); // Data send process (User's buffer -> Destination through H/W Tx socket buffer)
                     if(ret < 0) // Send Error occurred (sent data length < 0)
                     {
                         close(socketNum); // socket close
