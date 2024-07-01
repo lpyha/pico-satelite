@@ -1,9 +1,9 @@
 /**
- * Copyright (c) 2021 WIZnet Co.,Ltd
- *
- * SPDX-License-Identifier: BSD-3-Clause
+ * @file main.c
+ * @brief socket通信でvalveを制御するプログラム
+ * @author Murakami Kantaro
+ * @date 2024-07-01
  */
-
 #include <stdio.h>
 #include <string.h>
 #include <stdint.h>
@@ -21,44 +21,66 @@
 
 /* Clock */
 #define PLL_SYS_KHZ (133 * 1000)
-
 /* Buffer */
 #define ETHERNET_BUF_MAX_SIZE (1024 * 2)
-
-/* Socket */
-#define SOCKET_LOOPBACK 0
-
 /* Port */
-#define PORT_LOOPBACK 5000
+#define PORT 5000
 
 #define HIGH 1
 #define LOW 0
 
 const uint8_t SOCKET_NUM = 0;
 
-/* Pins */
-
 #define INDICATOR_O2_VALVE 11
 #define INDICATOR_N2O_FILL_VALVE 12
 #define INDICATOR_N2O_DUMP_VALVE 13
 
+/**
+ * @brief ネットワーク情報
+ * @param mac MACアドレス
+ * @param ip IPアドレス
+ * @param sn サブネットマスク
+ * @param gw ゲートウェイ
+ * @param dns DNSサーバ
+ * @param dhcp DHCPの有効/無効
+ */
 static wiz_NetInfo g_net_info ={
-    .mac = {0x00, 0x08, 0xDC, 0x12, 0x34, 0x56}, // MAC address
-    .ip = {192, 168, 100, 100},                     // IP address
-    .sn = {255, 255, 255, 0},                    // Subnet Mask
-    .gw = {192, 168, 100, 1},                     // Gateway
-    .dns = {8, 8, 8, 8},                         // DNS server
-    .dhcp = NETINFO_STATIC                       // DHCP enable/disable
+    .mac = {0x00, 0x08, 0xDC, 0x12, 0x34, 0x56},
+    .ip = {192, 168, 100, 100},
+    .sn = {255, 255, 255, 0},
+    .gw = {192, 168, 100, 1},
+    .dns = {8, 8, 8, 8},
+    .dhcp = NETINFO_STATIC
 };
 
+/**
+ * @brief 受信バッファ
+ */
 static uint8_t g_buf[ETHERNET_BUF_MAX_SIZE] = {
     0,
 };
 
+/**
+ * @brief システムクロックの周波数を設定する
+ */
+static void set_clock_khz(void){
+    // set a system clock frequency in khz
+    set_sys_clock_khz(PLL_SYS_KHZ, true);
+    // configure the specified clock
+    clock_configure(
+        clk_peri,
+        0,                                                // No glitchless mux
+        CLOCKS_CLK_PERI_CTRL_AUXSRC_VALUE_CLKSRC_PLL_SYS, // System PLL on AUX mux
+        PLL_SYS_KHZ * 1000,                               // Input frequency
+        PLL_SYS_KHZ * 1000                                // Output (must be same as no divider)
+    );
+}
 
-/* Clock */
-static void set_clock_khz(void);
-
+/**
+ * @brief 4Byteのデータを32bitの符号なし整数(uint32_t)に変換する
+ * @param[in] buf* uint8_t型の配列,サイズは4Byte
+ * @return uint32_t型の値
+ */
 uint32_t convert2Uint32(const uint8_t* buf) {
     return  ((uint32_t)buf[0] << 24) |
             ((uint32_t)buf[1] << 16) |
@@ -66,7 +88,14 @@ uint32_t convert2Uint32(const uint8_t* buf) {
             (uint32_t)buf[3];
 }
 
-void convertToUint8Array(uint32_t header, uint32_t command, uint8_t* array) {
+/**
+ * @brief 2つのuint32_t型の値をuint8_t型の配列に変換する
+ *        socket通信で送信するためのデータ(header, cmd)を作成している
+ * @param[in] header uint32_t型のheader
+ * @param[in] command uint32_t型のcommand
+ * @param[out] array uint8_t型の配列,サイズは8Byte
+ */
+void convert2Uint8Array(uint32_t header, uint32_t command, uint8_t* array) {
     array[0] = (uint8_t)(header >> 24); // 最上位バイト
     array[1] = (uint8_t)(header >> 16);
     array[2] = (uint8_t)(header >> 8);
@@ -78,6 +107,12 @@ void convertToUint8Array(uint32_t header, uint32_t command, uint8_t* array) {
     array[7] = (uint8_t)(command); // 最下位バイト
 }
 
+/**
+ * @brief valveを制御する関数
+ * @param[in] header uint32_t型のheader
+ * @param[in] command uint32_t型のcommand
+ * @return 0:正常終了, -1:エラー
+ */
 int actionActuator(uint32_t header, uint32_t command){
     uint32_t ret;
     uint8_t sendBuf[8]; 
@@ -85,19 +120,19 @@ int actionActuator(uint32_t header, uint32_t command){
         case HEADER_FILL:
             if (command == COMMAND_OPEN){
                 ret = onFillSequence();
-                convertToUint8Array(header, ret, sendBuf);
+                convert2Uint8Array(header, ret, sendBuf);
                 send(SOCKET_NUM, (uint8_t*)&sendBuf, 8);
             } else if (command == COMMAND_STATUS){
                 ret = getN2OFillValveStatus();
-                convertToUint8Array(header, ret, sendBuf);
+                convert2Uint8Array(header, ret, sendBuf);
                 send(SOCKET_NUM, (uint8_t*)&sendBuf, 8);
             } else if (command == COMMAND_CLOSE){
                 ret = offFillSequence();
-                convertToUint8Array(header, ret, sendBuf);
+                convert2Uint8Array(header, ret, sendBuf);
                 send(SOCKET_NUM, (uint8_t*)&sendBuf, 8);
             } else {
                 ret = COMMAND_ERORR;
-                convertToUint8Array(header, ret, sendBuf);
+                convert2Uint8Array(header, ret, sendBuf);
                 send(SOCKET_NUM, (uint8_t*)&sendBuf, 8);
                 return -1;
             }
@@ -105,19 +140,19 @@ int actionActuator(uint32_t header, uint32_t command){
         case HEADER_DUMP:
             if (command == COMMAND_OPEN){
                 ret = onDumpSequence();
-                convertToUint8Array(header, ret, sendBuf);
+                convert2Uint8Array(header, ret, sendBuf);
                 send(SOCKET_NUM, (uint8_t*)&sendBuf, 8);
             } else if (command == COMMAND_STATUS){
                 ret = getN2ODumpValveStatus();
-                convertToUint8Array(header, ret, sendBuf);
+                convert2Uint8Array(header, ret, sendBuf);
                 send(SOCKET_NUM, (uint8_t*)&sendBuf, 8);
             } else if (command == COMMAND_CLOSE){
                 ret = offDumpSequence();
-                convertToUint8Array(header, ret, sendBuf);
+                convert2Uint8Array(header, ret, sendBuf);
                 send(SOCKET_NUM, (uint8_t*)&sendBuf, 8);
             } else {
                 ret = COMMAND_ERORR;
-                convertToUint8Array(header, ret, sendBuf);
+                convert2Uint8Array(header, ret, sendBuf);
                 send(SOCKET_NUM, (uint8_t*)&sendBuf, 8);
                 return -1;
             }
@@ -125,19 +160,19 @@ int actionActuator(uint32_t header, uint32_t command){
         case HEADER_PURGE:
             if (command == COMMAND_OPEN){
                 ret = onPurgeSequence();
-                convertToUint8Array(header, ret, sendBuf);
+                convert2Uint8Array(header, ret, sendBuf);
                 send(SOCKET_NUM, (uint8_t*)&sendBuf, 8);
             } else if (command == COMMAND_STATUS){
                 ret = getN2ODumpValveStatus();
-                convertToUint8Array(header, ret, sendBuf);
+                convert2Uint8Array(header, ret, sendBuf);
                 send(SOCKET_NUM, (uint8_t*)&sendBuf, 8);
             } else if (command == COMMAND_CLOSE){
                 ret = offPurgeSequence();
-                convertToUint8Array(header, ret, sendBuf);
+                convert2Uint8Array(header, ret, sendBuf);
                 send(SOCKET_NUM, (uint8_t*)&sendBuf, 8);
             } else {
                 ret = COMMAND_ERORR;
-                convertToUint8Array(header, ret, sendBuf);
+                convert2Uint8Array(header, ret, sendBuf);
                 send(SOCKET_NUM, (uint8_t*)&sendBuf, 8);
                 return -1;
             }
@@ -145,26 +180,26 @@ int actionActuator(uint32_t header, uint32_t command){
         case HEADER_IGNITION:
             if (command == COMMAND_OPEN){
                 ret = onIgnitionSequence();
-                convertToUint8Array(header, ret, sendBuf);
+                convert2Uint8Array(header, ret, sendBuf);
                 send(SOCKET_NUM, (uint8_t*)&sendBuf, 8);
             } else if (command == COMMAND_STATUS){
                 ret = getO2ValveStatus();
-                convertToUint8Array(header, ret, sendBuf);
+                convert2Uint8Array(header, ret, sendBuf);
                 send(SOCKET_NUM, (uint8_t*)&sendBuf, 8);
             } else if (command == COMMAND_CLOSE){
                 ret = offIgnitionSequence();
-                convertToUint8Array(header, ret, sendBuf);
+                convert2Uint8Array(header, ret, sendBuf);
                 send(SOCKET_NUM, (uint8_t*)&sendBuf, 8);
             } else {
                 ret = COMMAND_ERORR;
-                convertToUint8Array(header, ret, sendBuf);
+                convert2Uint8Array(header, ret, sendBuf);
                 send(SOCKET_NUM, (uint8_t*)&sendBuf, 8);
                 return -1;
             }
             break;
         default:
             ret = COMMAND_ERORR;
-            convertToUint8Array(header, ret, sendBuf);
+            convert2Uint8Array(header, ret, sendBuf);
             send(SOCKET_NUM, (uint8_t*)&sendBuf, 8);
             return -1;
             break;
@@ -271,6 +306,8 @@ int main()
                 break;
                 //return ret;
             }
+            // socket close->GSEとの通信が遮断されたときすべてのValveを閉じる
+            emergencyShutdown();
             printf("%d:Socket Closed\r\n", SOCKET_NUM);
             break;
         case SOCK_INIT:
@@ -281,7 +318,7 @@ int main()
             }
             break;
         case SOCK_CLOSED:
-            if ((ret = socket(SOCKET_NUM, Sn_MR_TCP, PORT_LOOPBACK, 0)) == 0)
+            if ((ret = socket(SOCKET_NUM, Sn_MR_TCP, PORT, 0)) == 0)
             {
                 break;
                 //return ret;
@@ -291,20 +328,4 @@ int main()
             break;
         };
     }
-}
-
-/* Clock */
-static void set_clock_khz(void)
-{
-    // set a system clock frequency in khz
-    set_sys_clock_khz(PLL_SYS_KHZ, true);
-
-    // configure the specified clock
-    clock_configure(
-        clk_peri,
-        0,                                                // No glitchless mux
-        CLOCKS_CLK_PERI_CTRL_AUXSRC_VALUE_CLKSRC_PLL_SYS, // System PLL on AUX mux
-        PLL_SYS_KHZ * 1000,                               // Input frequency
-        PLL_SYS_KHZ * 1000                                // Output (must be same as no divider)
-    );
 }
