@@ -10,6 +10,8 @@
 #include <pico/stdio.h>
 #include "port_common.h"
 
+#include "uart2rs232c.hpp"
+
 #define HIGH 1
 #define LOW 0
 
@@ -101,6 +103,11 @@ uint32_t offPurgeSequence(){
 uint32_t onIgnitionSequence(){
     gpio_put(O2_VALVE, HIGH);
     gpio_put(INDICATOR_O2_VALVE, HIGH);
+    if(!sendOnIgnition()){
+        gpio_put(O2_VALVE, LOW);
+        gpio_put(INDICATOR_O2_VALVE, LOW);
+        return COMMAND_ERORR;
+    }
     return COMMAND_OPEN;
 }
 
@@ -111,6 +118,9 @@ uint32_t onIgnitionSequence(){
 uint32_t offIgnitionSequence(){
     gpio_put(O2_VALVE, LOW);
     gpio_put(INDICATOR_O2_VALVE, LOW);
+    if(!sendOffIgnition()){
+        return COMMAND_ERORR;
+    }
     return COMMAND_CLOSE;
 }
 
