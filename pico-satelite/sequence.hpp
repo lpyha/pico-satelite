@@ -15,9 +15,9 @@
 #define HIGH 1
 #define LOW 0
 
-#define O2_VALVE 9
-#define N2O_FILL_VALVE 10
-#define N2O_DUMP_VALVE 11
+#define O2_VALVE 6
+#define N2O_FILL_VALVE 7
+#define N2O_DUMP_VALVE 8
 
 #define INDICATOR_O2_VALVE 11
 #define INDICATOR_N2O_FILL_VALVE 12
